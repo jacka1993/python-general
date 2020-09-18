@@ -1,0 +1,168 @@
+//Import library requirements
+const puppeteer = require("puppeteer");
+const _ = require("lodash");
+const xlsx = require("xlsx");
+var download = require("download-pdf");
+var fs = require("fs");
+
+//General variables
+const workbook = xlsx.readFile("./tester.xlsx");
+const headlessFlag = false;
+
+//Read Excel and get vector for col A
+const worksheet = workbook.Sheets[workbook.SheetNames[0]];
+const columnA = [];
+for (let z in worksheet) {
+  if (z.toString()[0] === "A") {
+    columnA.push(worksheet[z].v);
+  }
+}
+
+//Test variable if needed
+//const value = columnA[2];
+//console.log(value);
+
+//main function
+(async function main() {
+  try {
+    console.log("Started");
+    //Create browser session
+    const browser = await puppeteer.launch({ headless: headlessFlag });
+    const page = await browser.newPage();
+    page.setUserAgent(
+      "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_14_4) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/73.0.3683.103 Safari/537.36"
+    );
+
+    //Start page
+    await page.goto(
+      "https://www.concursolutions.com/Expense/Client/default.asp"
+    );
+    console.log("URL loaded");
+
+    //Login
+    await page.type("#userid", "USERNAME");
+    await page.type("#password", "PASSWORD");
+    await page.click("#btnSubmit");
+    console.log("logged in");
+
+    //Login confirmation screen. If headless, don't need this step
+    if (headlessFlag == false) {
+      await page.waitForSelector(
+        "#frmMain > table > tbody > tr:nth-child(4) > td > button"
+      );
+      await page.click(
+        "#frmMain > table > tbody > tr:nth-child(4) > td > button"
+      );
+      console.log("logged in properly");
+    }
+
+    //Nav bar
+    await page.waitForSelector(
+      "#queryChildren0 > ul > li.cnqr-nav-expense > a"
+    );
+    await page.click("#queryChildren0 > ul > li.cnqr-nav-expense > a");
+
+    console.log("on expense page");
+
+    await page.waitForSelector(
+      "#cnqr-navbar-secondary > ul > li.dropdown.cnqr-nav-expense_1 > a"
+    );
+    await page.hover(
+      "#cnqr-navbar-secondary > ul > li.dropdown.cnqr-nav-expense_1 > a"
+    );
+    console.log("hovering");
+
+    await page.waitForSelector(
+      "#cnqr-navbar-secondary > ul > li.dropdown.cnqr-nav-expense_1 > ul > li.cnqr-nav-expense_1_0 > a"
+    );
+    await page.click(
+      "#cnqr-navbar-secondary > ul > li.dropdown.cnqr-nav-expense_1 > ul > li.cnqr-nav-expense_1_0 > a"
+    );
+    console.log("receipt processing page");
+
+    await page.waitForSelector("#ext-gen20 > em > span > span");
+    await page.click("#ext-gen20 > em > span > span", "elephant");
+
+    //Loop through Excel and download
+    for (var i = 2, len = columnA.length; i < len; i++) {
+      value = columnA[i];
+      console.log(value);
+      if (
+        fs.existsSync(
+          "/Users/jjackaeast001/Desktop/SalesForce/" + value + ".pdf"
+        )
+      ) {
+        //skip file
+      } else {
+        await page.waitForSelector("#ext-comp-1010");
+        await page.click("#ext-comp-1010", { clickCount: 3 });
+        await page.type("#ext-comp-1010", value);
+        //console.log("report id set");
+
+        await page.waitForSelector("#ext-gen30");
+        await page.click("#ext-gen30");
+        //console.log("popup generated");
+
+        await page.waitFor(1000);
+
+        //Timeout loop to get image URL
+        loop = 1;
+        while (loop < 50) {
+          const pages = await browser.pages(); // get all open pages by the browser
+          if (pages.length == 1) {
+            break;
+          }
+          const popup = pages[pages.length - 1]; // the popup should be the last page opened
+          var URL = popup.url();
+          if (URL.substring(0, 21) == "https://imagingupload") {
+            //console.log(URL);
+            loop = 100;
+            break;
+          }
+          await page.waitFor(1000);
+          try {
+            await page.click("#ext-gen101");
+            break;
+          } catch (e) {}
+          //console.log(URL);
+          loop = loop + 1;
+        }
+
+        await page.waitFor(1000);
+
+        if (loop == 100) {
+          const pages = await browser.pages(); // get all open pages by the browser
+          const popup = pages[pages.length - 1]; // the popup should be the last page opened
+          var URL = popup.url();
+
+          popup.close();
+
+          var options = {
+            //directory: "/Users/jjackaeast001/Desktop/SalesForce",
+            directory:
+              "/Volumes/GoogleDrive/My Drive/Enterprise digital/Clients/SalesForce/ConcurExtract/",
+            filename: value + ".pdf"
+          };
+
+          //Use HTTP request direct download to save PDF
+          download(URL, options, function(err) {
+            if (err) throw err;
+          });
+        } else {
+          const pages = await browser.pages(); // get all open pages by the browser
+          if (pages.length > 2) {
+            const popup = pages[pages.length - 1]; // the popup should be the last page opened
+            popup.close();
+          }
+        }
+      }
+      console.log(i);
+    }
+
+    await browser.close();
+
+    console.log("done");
+  } catch (e) {
+    console.log("our error", e);
+  }
+})();
